@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>平滑行走模拟器</title>
+    <title>平滑行走模拟器 (已配置IP)</title>
     <style>
         body {
             font-family: 'Courier New', monospace;
@@ -35,126 +35,143 @@
             position: absolute;
             transform: translate(-50%, -50%);
             box-shadow: 0 0 10px red;
+            transition: left 0.05s linear, top 0.05s linear;
         }
-        #info { margin-top: 20px; text-align: center; }
-        button { padding: 10px 20px; font-size: 16px; margin-bottom: 20px; }
-        .log { font-size: 10px; color: gray; margin-top: 5px; }
+        #info { margin-top: 20px; text-align: center; width: 90%; }
+        button { padding: 15px 30px; font-size: 18px; margin-bottom: 20px; background: #0f0; border: none; font-weight: bold; cursor: pointer; }
+        .log { font-size: 12px; color: gray; margin-top: 5px; word-break: break-all; }
+        
+        /* 状态指示灯 */
+        .status-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: gray;
+            margin-right: 5px;
+        }
     </style>
 </head>
 <body>
-    <button id="btn" onclick="requestPermission()">点击开始控制</button>
+    <button id="btn" onclick="requestPermission()">点击授权并开始</button>
 
     <div id="canvas-area">
         <div id="pointer" style="left: 50%; top: 50%;"></div>
     </div>
 
     <div id="info">
-        <div>X: <span id="val-x">250.0</span> m</div>
-        <div>Y: <span id="val-y">250.0</span> m</div>
+        <div><span id="status-dot" class="status-dot"></span>状态: <span id="status-text">未连接</span></div>
+        <hr style="border-color: #333; margin: 10px 0;">
+        <div>X: <span id="val-x">250.0</span> | Y: <span id="val-y">250.0</span></div>
         <div>速度: <span id="speed">0</span> m/s</div>
-        <div class="log" id="net-log">等待发送数据...</div>
+        <div class="log" id="net-log">等待连接服务器...</div>
     </div>
 
     <script>
-        // --- 核心配置 ---
-        // 电脑的局域网IP (关键！你需要改成你电脑的真实IP，比如 192.168.1.5)
-        const SERVER_URL = "http://192.168.1.33:5000/data";
+        // ==========================================
+        // ▼▼▼ 已帮你填好 ▼▼▼
+        const IP = "192.168.1.33"; 
+        const PORT = "5000"; // Flask 默认端口
+        const SERVER_URL = `http://${IP}:${PORT}/data`;
+        // ==========================================
         
-        const MAX_SPEED = 3.0; // 最大速度 3米/秒
-        const FPS = 50;        // 物理引擎刷新率 (每秒50次)
-        const SEND_RATE = 1000;// 数据发送频率 (1秒1次)
+        const MAX_SPEED = 3.0; 
+        const FPS = 50;        
+        const SEND_RATE = 200; // 0.2秒发一次，更跟手
         
-        // --- 状态变量 ---
         let posX = 250.0;
         let posY = 250.0;
-        let tiltX = 0; // 左右倾斜量 (-1 到 1)
-        let tiltY = 0; // 前后倾斜量 (-1 到 1)
+        let tiltX = 0; 
+        let tiltY = 0; 
         
-        // --- 1. 物理引擎 (每20ms计算一次位置) ---
-        // 这样画面看起来是丝滑的，就像人在真的走
+        // --- 1. 物理引擎 ---
         setInterval(() => {
-            // 计算当前速度分量
             let vx = tiltX * MAX_SPEED;
             let vy = tiltY * MAX_SPEED;
 
-            // 更新位置 (速度 / FPS = 每一帧移动的距离)
-            posX += vx / (FPS / 10); // 稍微加速一点显示效果
+            posX += vx / (FPS / 10); 
             posY += vy / (FPS / 10);
 
-            // 限制不出界 (0-500)
             if(posX < 0) posX = 0;
             if(posX > 500) posX = 500;
             if(posY < 0) posY = 0;
             if(posY > 500) posY = 500;
 
-            // 更新UI
             document.getElementById('pointer').style.left = (posX / 500 * 100) + '%';
             document.getElementById('pointer').style.top = (posY / 500 * 100) + '%';
             document.getElementById('val-x').innerText = posX.toFixed(1);
             document.getElementById('val-y').innerText = posY.toFixed(1);
             
-            // 计算合速度显示
             let currentSpeed = Math.sqrt(vx*vx + vy*vy);
             document.getElementById('speed').innerText = currentSpeed.toFixed(1);
-
         }, 1000 / FPS);
 
-        // --- 2. 传感器监听 ---
+        // --- 2. 传感器 ---
         function handleOrientation(event) {
-            // Gamma(左右): -30 ~ 30 映射为 -1 ~ 1
             let g = event.gamma || 0;
             let b = event.beta || 0;
-
-            // 归一化并限制在 -1 到 1 之间
-            tiltX = clamp(g / 30, -1, 1);
-            tiltY = clamp(b / 30, -1, 1);
-            
-            // 修正 Y 轴方向 (抬头 beta>0 应往上走/Y减小? 或者往下走? 这里设为抬头=向上)
-            // 如果觉得反了，把下面的 tiltY 取反即可
+            // 调整灵敏度，除数越小越灵敏
+            tiltX = clamp(g / 20, -1, 1);
+            tiltY = clamp(b / 20, -1, 1);
             tiltY = -tiltY; 
         }
 
-        // --- 3. 数据发送 (每1秒向Python发一次) ---
+        // --- 3. 网络发送 ---
         setInterval(() => {
             const payload = {
                 x: Math.round(posX),
                 y: Math.round(posY)
             };
 
-            // 使用 fetch 发送 POST 请求
+            const logEl = document.getElementById('net-log');
+            const statusDot = document.getElementById('status-dot');
+            const statusText = document.getElementById('status-text');
+
             fetch(SERVER_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                keepalive: true 
             })
             .then(response => {
-                document.getElementById('net-log').innerText = "数据已发送: " + JSON.stringify(payload);
-                document.getElementById('net-log').style.color = "gray";
+                if (response.ok) return response.json();
+                throw new Error("Server Error");
+            })
+            .then(data => {
+                statusDot.style.backgroundColor = "#0f0"; // 绿灯
+                statusText.innerText = "在线";
+                statusText.style.color = "#0f0";
+                logEl.innerText = `发送: (${payload.x}, ${payload.y}) -> 成功`;
+                logEl.style.color = "gray";
             })
             .catch(error => {
-                document.getElementById('net-log').innerText = "发送失败 (检查IP配置)";
-                document.getElementById('net-log').style.color = "red";
+                statusDot.style.backgroundColor = "red"; // 红灯
+                statusText.innerText = "连接失败";
+                statusText.style.color = "red";
+                // 显示更具体的错误建议
+                logEl.innerText = `无法连接 ${IP}:${PORT}\n请检查电脑防火墙!`;
+                logEl.style.color = "red";
             });
 
         }, SEND_RATE);
 
-        // 工具函数
         function clamp(val, min, max) { return Math.min(Math.max(val, min), max); }
         
-        // 权限请求
         function requestPermission() {
-            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission().then(state => {
-                    if (state === 'granted') window.addEventListener('deviceorientation', handleOrientation);
+                    if (state === 'granted') {
+                        window.addEventListener('deviceorientation', handleOrientation);
+                        document.getElementById('btn').style.display = 'none';
+                    } else {
+                        alert("需要传感器权限才能控制哦");
+                    }
                 });
             } else {
                 window.addEventListener('deviceorientation', handleOrientation);
+                document.getElementById('btn').style.display = 'none';
             }
-            document.getElementById('btn').style.display = 'none';
         }
     </script>
 </body>
 </html>
-
-
-
